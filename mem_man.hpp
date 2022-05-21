@@ -26,6 +26,10 @@ namespace memman {
     auto operator->(void) -> Tobj& { return *ptr_; }
     auto operator->(void) const -> Tobj& { return *ptr_; }
 
+    friend auto operator<<(std::ostream& os, const Pointer<Tobj>& p) {
+      return os << p.Get();
+    }
+
   private:
     using DeleterFunc = std::function<void()>();
     Tobj* ptr_;
