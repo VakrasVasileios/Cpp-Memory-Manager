@@ -1,6 +1,8 @@
 #pragma once
 
 #include <list>
+#include <functional>
+#include <assert.h>
 
 using size_t = unsigned long;
 
@@ -13,17 +15,21 @@ namespace memman {
   template <class Tobj>
   class Pointer {
   public:
-    Pointer() { ptr_ = new Tobj; };
-    Pointer(Pointer& _ptr) = default;
-    Pointer(Pointer&& _ptr) = default;
+    Pointer(Tobj* _obj) { ptr_ = _obj; }
+    Pointer(const Pointer& _ptr) { ptr_ = _ptr.ptr_; del_(); }
+    Pointer(Pointer&& _ptr) { ptr_ = _ptr.ptr_; del_() }
 
-    auto Get() const -> Tobj { return ptr_; }
+    auto Get() const -> Tobj* { return ptr_; }
 
-    friend class MemoryManager<Tobj>;
+    auto operator*(void) -> Tobj& { return *ptr_; }
+    auto operator*(void) const -> Tobj& { return *ptr_; }
+    auto operator->(void) -> Tobj& { return *ptr_; }
+    auto operator->(void) const -> Tobj& { return *ptr_; }
 
   private:
+    using DeleterFunc = std::function<void()>();
     Tobj* ptr_;
-    size_t ref_count_ = 0;
+    DeleterFunc del_;
   };
 
   namespace {
@@ -38,6 +44,8 @@ namespace memman {
       ~MemoryChunk() {}
 
       bool IsFull(void) { return managed_space_.size() == CHUNK_SIZE ? true : false; }
+      bool IsEmpty(void) { return managed_space_.size() == 0; }
+      auto Size(void) { return managed_space_.size(); }
 
     protected:
       class Iterator {
@@ -45,13 +53,17 @@ namespace memman {
         Iterator(int _index) : index_(_index) {}
         ~Iterator() = default;
 
+        auto GetCount(void) const { return chunk_[index_].second; }
+        void IncreaseCount(void) { ++(chunk_[index_].second); }
+        void DecreaseCount(void) { --(chunk_[index_].second); }
+
       private:
         int index_;
       };
 
       friend Iterator;
     private:
-      Pointer<Tobj> chunk_[CHUNK_SIZE];
+      std::pair<Tobj*, size_t> chunk_[CHUNK_SIZE];
       std::list<Iterator> free_space_;
       std::list<Iterator> managed_space_;
     };
@@ -62,11 +74,12 @@ namespace memman {
       static auto Get() -> MemoryManager& { return singleton_; }
 
       template<typename Args>
-      auto New(Args...) -> Pointer<Tmem> { }
+      auto New(Args... args) -> Pointer<Tmem> {  }
 
     private:
       MemoryManager singleton_;
       std::list<MemoryChunk<Tobj>> chunk_list_;
+      int delete_count_ = 0, new_count_ = 0;
 
       MemoryManager() = default;
       MemoryManager(const MemoryManager&) = delete;
