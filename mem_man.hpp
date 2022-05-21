@@ -16,8 +16,8 @@ namespace memman {
   class Pointer {
   public:
     Pointer(Tobj* _obj) { ptr_ = _obj; }
-    Pointer(const Pointer& _ptr) { ptr_ = _ptr.ptr_; del_(); }
-    Pointer(Pointer&& _ptr) { ptr_ = _ptr.ptr_; del_() }
+    Pointer(const Pointer& _obj) { ptr_ = _obj.ptr_; }
+    Pointer(Pointer&& _obj) { ptr_ = _obj.ptr_; }
 
     auto Get() const -> Tobj* { return ptr_; }
 
@@ -38,14 +38,39 @@ namespace memman {
     class MemoryChunk final {
     public:
       MemoryChunk() {
-        for (int i = 0; i < CHUNK_SIZE; i++)
+        for (int i = 0; i < CHUNK_SIZE; i++) {
+          chunk_[i].first = nullptr;
           free_space_.emplace_back(i);
+        }
       }
       ~MemoryChunk() {}
 
+      template<typename... Args>
+      auto Allocate(Args&&... args) -> Tobj* {
+        if (!free_space_.empty()) {
+          auto iter = free_space_.front();
+          if (chunk_[iter.Get()].first != nullptr) {
+            Tobj obj(args...);
+            *(chunk_[iter.Get()].first) = obj;
+          }
+          else {
+            chunk_[iter.Get()].first = new Tobj(args...);
+          }
+          chunk_[iter.Get()].second = 1;
+
+          free_space_.pop_front();
+          managed_space_.push_back(iter);
+
+          return chunk_[iter.Get()].first;
+        }
+        else
+          // return nullptr so that the manager creates a new memory chunk
+          return nullptr;
+      }
+
       bool IsFull(void) { return managed_space_.size() == CHUNK_SIZE ? true : false; }
       bool IsEmpty(void) { return managed_space_.size() == 0; }
-      auto Size(void) { return managed_space_.size(); }
+      auto Size(void) -> size_t { return managed_space_.size(); }
 
     protected:
       class Iterator {
@@ -53,7 +78,9 @@ namespace memman {
         Iterator(int _index) : index_(_index) {}
         ~Iterator() = default;
 
-        auto GetCount(void) const { return chunk_[index_].second; }
+        auto Get() const -> const int { return index_; }
+
+        auto GetCount(void) const -> size_t { return chunk_[index_].second; }
         void IncreaseCount(void) { ++(chunk_[index_].second); }
         void DecreaseCount(void) { --(chunk_[index_].second); }
 
@@ -71,13 +98,30 @@ namespace memman {
     template <class Tobj>
     class MemoryManager final {
     public:
-      static auto Get() -> MemoryManager& { return singleton_; }
+      static auto Get() -> MemoryManager& {
+        static MemoryManager singleton_;
+        return singleton_;
+      }
 
-      template<typename Args>
-      auto New(Args... args) -> Pointer<Tmem> {  }
+      template<typename... Args>
+      auto New(Args&&... args) -> Pointer<Tobj> {
+        Tobj* new_obj;
+        for (auto chunk : chunk_list_) {
+          new_obj = chunk.Allocate(args...);
+          if (new_obj != nullptr)
+            return Pointer<Tobj>(new_obj);
+        }
+        if (new_obj == nullptr) {
+          chunk_list_.emplace_back();
+          new_obj = chunk_list_.back().Allocate(args...);
+          return Pointer<Tobj>(new_obj);
+        }
+        else {
+          assert(false);
+        }
+      }
 
     private:
-      MemoryManager singleton_;
       std::list<MemoryChunk<Tobj>> chunk_list_;
       int delete_count_ = 0, new_count_ = 0;
 
@@ -87,5 +131,8 @@ namespace memman {
     };
 
   } // namespace
+
+  template<typename Tobj, typename... Args>
+  auto make_pointer(Args&&... args) -> Pointer<Tobj> { return MemoryManager<Tobj>::Get().New(args...); }
 
 } // namespace memman
