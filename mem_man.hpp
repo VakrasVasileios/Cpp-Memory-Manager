@@ -32,45 +32,31 @@ using size_t = unsigned long;
 
 namespace memman {
 
-  template <class Tobj>
-  class Pointer {
-  public:
-    Pointer() : ptr_(nullptr) {}
-    Pointer(const Pointer& _obj) { ptr_ = _obj.ptr_; }
-    Pointer(Pointer&& _obj) { ptr_ = _obj.ptr_; }
-
-    auto Get() const -> Tobj* { return ptr_; }
-
-    auto operator*(void) -> Tobj& { return *ptr_; }
-    auto operator*(void) const -> Tobj& { return *ptr_; }
-    auto operator->(void) -> Tobj& { return *ptr_; }
-    auto operator->(void) const -> Tobj& { return *ptr_; }
-
-    friend auto operator<<(std::ostream& os, const Pointer<Tobj>& p) -> std::ostream& {
-      return os << p.Get();
-    }
-
-  private:
-    using DeleterFunc = std::function<void()>();
-    Tobj* ptr_;
-    DeleterFunc del_;
-  };
+  template <typename Tobj>
+  class Pointer;
 
   namespace {
 
     template<class Tobj>
     class MemoryChunk final {
     public:
+      using CountControler = std::function<void(int)>;
+    public:
       MemoryChunk() {
         for (int i = 0; i < CHUNK_SIZE; i++) {
-          chunk_[i].first = nullptr;
+          chunk_[i] = nullptr;
+          counters_[i] = 0;
+          cnt_ctrl_[i] = [this, i](int op) {
+            static int index = i;
+            counters_[index] += op;
+          };
           free_space_.emplace_back(i);
         }
       }
       ~MemoryChunk() {
         for (int i = 0; i < CHUNK_SIZE; i++) {
-          if (chunk_[i].first != nullptr)
-            delete chunk_[i].first;
+          if (chunk_[i] != nullptr)
+            delete chunk_[i];
         }
       }
 
@@ -78,19 +64,19 @@ namespace memman {
       auto Allocate(Args&&... args) -> Tobj* {
         if (!free_space_.empty()) {
           auto iter = free_space_.front();
-          if (chunk_[iter.Get()].first != nullptr) {
+          if (chunk_[iter.Get()] != nullptr) {
             Tobj obj(args...);
-            *(chunk_[iter.Get()].first) = obj;
+            *(chunk_[iter.Get()]) = obj;
           }
           else {
-            chunk_[iter.Get()].first = new Tobj(std::forward<Args>(args)...);
+            chunk_[iter.Get()] = new Tobj(std::forward<Args>(args)...);
           }
-          chunk_[iter.Get()].second = 1;
+          counters_[iter.Get()] = 1;
 
           free_space_.pop_front();
           managed_space_.push_back(iter);
 
-          return chunk_[iter.Get()].first;
+          return chunk_[iter.Get()];
         }
         else
           // return nullptr so that the manager creates a new memory chunk
@@ -101,7 +87,6 @@ namespace memman {
       bool IsEmpty(void) { return managed_space_.size() == 0; }
       auto Size(void) -> size_t { return managed_space_.size(); }
 
-    protected:
       class Iterator {
       public:
         Iterator(int _index) : index_(_index) {}
@@ -109,9 +94,9 @@ namespace memman {
 
         auto Get() const -> const int { return index_; }
 
-        auto GetCount(void) const -> size_t { return chunk_[index_].second; }
-        void IncreaseCount(void) { ++(chunk_[index_].second); }
-        void DecreaseCount(void) { --(chunk_[index_].second); }
+        auto GetCount(void) const -> size_t { return counters_[index_]; }
+        void IncreaseCount(void) { ++(counters_[index_]); }
+        void DecreaseCount(void) { --(counters_[index_]); }
 
       private:
         int index_;
@@ -119,7 +104,10 @@ namespace memman {
 
       friend Iterator;
     private:
-      std::tuple<Tobj*, size_t, > chunk_[CHUNK_SIZE];
+      Tobj* chunk_[CHUNK_SIZE];
+      size_t counters_[CHUNK_SIZE];
+      CountControler cnt_ctrl_[CHUNK_SIZE];
+
       std::list<Iterator> free_space_;
       std::list<Iterator> managed_space_;
     };
@@ -138,6 +126,7 @@ namespace memman {
 
     private:
       std::list<ObserverFunc> observers_;
+      size_t mem_size_ = MEM_SIZE; // soft max
       size_t mem_used_cache_ = 0;
 
       MemoryObserver() = default;
@@ -156,7 +145,7 @@ namespace memman {
 
       template<typename... Args>
       auto New(Args&&... args) -> Pointer<Tobj> {
-        Tobj* new_obj;
+        Tobj* new_obj = nullptr;
         for (auto chunk : chunk_list_) {
           new_obj = chunk.Allocate(std::forward<Args>(args)...);
           if (new_obj != nullptr)
@@ -177,7 +166,7 @@ namespace memman {
 
       MemoryManager() {
         MemoryObserver::Get().RegisterObserver(
-          [&chunk_list_]() {
+          [this]() {
             return CHUNK_SIZE * sizeof(Tobj) * chunk_list_.size();
           }
         );
@@ -190,6 +179,44 @@ namespace memman {
     };
 
   } // namespace
+
+  template <typename Tobj>
+  class Pointer {
+  public:
+    Pointer(Tobj* obj) : ptr_(obj) {}
+    Pointer(const Pointer& _obj) {
+      ptr_ = _obj.ptr_;
+      del_(-1);
+      _obj.del_(1);
+      del_ = _obj.del_;
+    }
+    Pointer(Pointer&& _obj) {
+      ptr_ = _obj.ptr_;
+      del_(-1);
+      del_ = _obj.del_;
+    }
+
+    auto Get() const -> Tobj& { return *ptr_; }
+    auto Get() -> Tobj& { return *ptr_; }
+
+    auto operator*(void) -> Tobj& { return *ptr_; }
+    auto operator*(void) const -> Tobj& { return *ptr_; }
+    auto operator->(void) -> Tobj& { return *ptr_; }
+    auto operator->(void) const -> Tobj& { return *ptr_; }
+
+    friend auto operator<<(std::ostream& os, const Pointer<Tobj>& p) -> std::ostream& {
+      return os << p.Get();
+    }
+
+    friend class MemoryManager<Tobj>;
+
+  private:
+    using DeleterFunc = std::function<void(int)>;
+    Tobj* ptr_;
+    DeleterFunc del_;
+
+
+  };
 
   template<typename Tobj, typename... Args>
   auto make_pointer(Args&&... args) -> Pointer<Tobj> { return MemoryManager<Tobj>::Get().New(std::forward<Args>(args)...); }
