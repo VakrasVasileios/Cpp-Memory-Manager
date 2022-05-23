@@ -148,8 +148,10 @@ namespace memman {
         Tobj* new_obj = nullptr;
         for (auto chunk : chunk_list_) {
           new_obj = chunk.Allocate(std::forward<Args>(args)...);
-          if (new_obj != nullptr)
-            return Pointer<Tobj>(new_obj);
+          if (new_obj != nullptr) {
+            Pointer<Tobj> ret(new_obj); // TODO: pass count controler funcs
+            return ret;
+          }
         }
         if (new_obj == nullptr) {
           chunk_list_.emplace_back();
@@ -186,14 +188,14 @@ namespace memman {
     Pointer(Tobj* obj) : ptr_(obj) {}
     Pointer(const Pointer& _obj) {
       ptr_ = _obj.ptr_;
-      del_(-1);
-      _obj.del_(1);
-      del_ = _obj.del_;
+      cnt_ctrlr_(-1);
+      _obj.cnt_ctrlr_(1);
+      cnt_ctrlr_ = _obj.cnt_ctrlr_;
     }
     Pointer(Pointer&& _obj) {
       ptr_ = _obj.ptr_;
-      del_(-1);
-      del_ = _obj.del_;
+      cnt_ctrlr_(-1);
+      cnt_ctrlr_ = _obj.cnt_ctrlr_;
     }
 
     auto Get() const -> Tobj& { return *ptr_; }
@@ -211,11 +213,9 @@ namespace memman {
     friend class MemoryManager<Tobj>;
 
   private:
-    using DeleterFunc = std::function<void(int)>;
+    using CountCtrl = std::function<void(int)>;
     Tobj* ptr_;
-    DeleterFunc del_;
-
-
+    CountCtrl cnt_ctrlr_;
   };
 
   template<typename Tobj, typename... Args>
