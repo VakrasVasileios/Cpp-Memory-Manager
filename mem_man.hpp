@@ -26,7 +26,7 @@ namespace memman {
     auto operator->(void) -> Tobj& { return *ptr_; }
     auto operator->(void) const -> Tobj& { return *ptr_; }
 
-    friend auto operator<<(std::ostream& os, const Pointer<Tobj>& p) {
+    friend auto operator<<(std::ostream& os, const Pointer<Tobj>& p) -> std::ostream& {
       return os << p.Get();
     }
 
@@ -47,7 +47,12 @@ namespace memman {
           free_space_.emplace_back(i);
         }
       }
-      ~MemoryChunk() {}
+      ~MemoryChunk() {
+        for (int i = 0; i < CHUNK_SIZE; i++) {
+          if (chunk_[i].first != nullptr)
+            delete chunk_[i].first;
+        }
+      }
 
       template<typename... Args>
       auto Allocate(Args&&... args) -> Tobj* {
@@ -58,7 +63,7 @@ namespace memman {
             *(chunk_[iter.Get()].first) = obj;
           }
           else {
-            chunk_[iter.Get()].first = new Tobj(args...);
+            chunk_[iter.Get()].first = new Tobj(std::forward<Args>(args)...);
           }
           chunk_[iter.Get()].second = 1;
 
@@ -111,13 +116,13 @@ namespace memman {
       auto New(Args&&... args) -> Pointer<Tobj> {
         Tobj* new_obj;
         for (auto chunk : chunk_list_) {
-          new_obj = chunk.Allocate(args...);
+          new_obj = chunk.Allocate(std::forward<Args>(args)...);
           if (new_obj != nullptr)
             return Pointer<Tobj>(new_obj);
         }
         if (new_obj == nullptr) {
           chunk_list_.emplace_back();
-          new_obj = chunk_list_.back().Allocate(args...);
+          new_obj = chunk_list_.back().Allocate(std::forward<Args>(args)...);
           return Pointer<Tobj>(new_obj);
         }
         else {
@@ -132,11 +137,14 @@ namespace memman {
       MemoryManager() = default;
       MemoryManager(const MemoryManager&) = delete;
       MemoryManager(MemoryManager&&) = delete;
+      ~MemoryManager() {
+        chunk_list_.clear();
+      }
     };
 
   } // namespace
 
   template<typename Tobj, typename... Args>
-  auto make_pointer(Args&&... args) -> Pointer<Tobj> { return MemoryManager<Tobj>::Get().New(args...); }
+  auto make_pointer(Args&&... args) -> Pointer<Tobj> { return MemoryManager<Tobj>::Get().New(std::forward<Args>(args)...); }
 
 } // namespace memman
