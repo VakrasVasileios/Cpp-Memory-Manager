@@ -3,6 +3,7 @@
 #include <list>
 #include <functional>
 #include <assert.h>
+#include <tuple>
 
 using size_t = unsigned long;
 
@@ -10,12 +11,31 @@ using size_t = unsigned long;
 #define CHUNK_SIZE 10
 #endif
 
+#ifndef HEAP_SIZE
+#define HEAP_SIZE 1024
+#endif
+
+#define MB 1000000
+#define MEM_SIZE HEAP_SIZE * MB
+
+#if defined(MEM_THRESH) > 100
+#define MEM_THRESH 100
+#endif
+
+#if defined(MEM_THRESH) < 0
+#define MEM_THRESH 25
+#endif
+
+#ifndef MEM_THRESH
+#define MEM_THRESH 60
+#endif
+
 namespace memman {
 
   template <class Tobj>
   class Pointer {
   public:
-    Pointer(Tobj* _obj) { ptr_ = _obj; }
+    Pointer() : ptr_(nullptr) {}
     Pointer(const Pointer& _obj) { ptr_ = _obj.ptr_; }
     Pointer(Pointer&& _obj) { ptr_ = _obj.ptr_; }
 
@@ -99,9 +119,31 @@ namespace memman {
 
       friend Iterator;
     private:
-      std::pair<Tobj*, size_t> chunk_[CHUNK_SIZE];
+      std::tuple<Tobj*, size_t, > chunk_[CHUNK_SIZE];
       std::list<Iterator> free_space_;
       std::list<Iterator> managed_space_;
+    };
+
+    class MemoryObserver final {
+    public:
+      using ObserverFunc = std::function<size_t(void)>;
+    public:
+      static auto Get(void) -> MemoryObserver& {
+        static MemoryObserver singleton;
+        return singleton;
+      }
+
+      void RegisterObserver(const ObserverFunc& f) { observers_.push_back(f); }
+      void SweepIfThreshold(void) {}
+
+    private:
+      std::list<ObserverFunc> observers_;
+      size_t mem_used_cache_ = 0;
+
+      MemoryObserver() = default;
+      MemoryObserver(const MemoryObserver&) = delete;
+      MemoryObserver(MemoryObserver&&) = delete;
+      ~MemoryObserver() = default;
     };
 
     template <class Tobj>
@@ -132,9 +174,14 @@ namespace memman {
 
     private:
       std::list<MemoryChunk<Tobj>> chunk_list_;
-      int delete_count_ = 0, new_count_ = 0;
 
-      MemoryManager() = default;
+      MemoryManager() {
+        MemoryObserver::Get().RegisterObserver(
+          [&chunk_list_]() {
+            return CHUNK_SIZE * sizeof(Tobj) * chunk_list_.size();
+          }
+        );
+      }
       MemoryManager(const MemoryManager&) = delete;
       MemoryManager(MemoryManager&&) = delete;
       ~MemoryManager() {
