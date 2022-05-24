@@ -50,6 +50,7 @@ namespace memman {
     public:
       using CountControler = std::function<void(int)>;
       class Iterator;
+
     public:
       MemoryChunk() {
         // std::cout << "chunk_size: " << CHUNK_SIZE << std::endl;
@@ -73,23 +74,22 @@ namespace memman {
       template<typename... Args>
       auto Allocate(Args&&... args) -> Iterator {
         if (!free_space_.empty()) {
-          auto iter = free_space_.front();
-          if (chunk_[iter.Get()] != nullptr) {
+          int index = free_space_.front();
+          if (chunk_[index] != nullptr) {
             Tobj obj(args...);
-            *(chunk_[iter.Get()]) = obj;
+            *(chunk_[index]) = obj;
           }
           else {
-            chunk_[iter.Get()] = new Tobj(std::forward<Args>(args)...);
+            chunk_[index] = new Tobj(std::forward<Args>(args)...);
           }
-          counters_[iter.Get()] = 1;
+          counters_[index] = 1;
 
           free_space_.pop_front();
-          managed_space_.push_back(iter);
+          managed_space_.push_back(index);
 
-          return iter;
+          return Iterator(chunk_[index], counters_[index], cnt_ctrl_[index]);
         }
-        else
-          throw MemChunkException();
+        throw MemChunkException();
       }
 
       bool IsFull(void) { return managed_space_.size() == CHUNK_SIZE ? true : false; }
@@ -98,31 +98,26 @@ namespace memman {
 
       class Iterator {
       public:
-        Iterator(int _index) : index_(_index) {}
+        Iterator(Tobj* _obj, size_t _counter, const CountControler& _ctrl) : obj_(_obj), counter_(_counter), ctrl_(_ctrl) {}
         ~Iterator() = default;
 
-        auto Get() const -> const int { return index_; }
-
-        auto GetPointer(void) -> Tobj* { return chunk_[index_]; }
-        auto GetCount(void) const -> size_t { return counters_[index_]; }
-        auto GetCntCtrl(void) const -> CountControler& { return cnt_ctrl_[index_]; }
-
-        void IncreaseCount(void) { ++(counters_[index_]); }
-        void DecreaseCount(void) { --(counters_[index_]); }
+        auto GetPointer(void) -> Tobj* { return obj_; }
+        auto GetCount(void) const -> size_t { return counter_; }
+        auto GetCntCtrl(void) const -> const CountControler& { return ctrl_; }
 
       private:
-        const int index_;
+        Tobj* obj_;
+        size_t counter_;
+        const CountControler& ctrl_;
       };
-
-      friend class Iterator;
 
     private:
       Tobj* chunk_[CHUNK_SIZE];
       size_t counters_[CHUNK_SIZE];
       CountControler cnt_ctrl_[CHUNK_SIZE];
 
-      std::list<Iterator> free_space_;
-      std::list<Iterator> managed_space_;
+      std::list<int> free_space_;
+      std::list<int> managed_space_;
     };
 
     class MemoryObserver final {
@@ -149,7 +144,9 @@ namespace memman {
       }
       MemoryObserver(const MemoryObserver&) = delete;
       MemoryObserver(MemoryObserver&&) = delete;
-      ~MemoryObserver() = default;
+      ~MemoryObserver() {
+        observers_.clear();
+      };
     };
 
     template <class Tobj>
@@ -164,17 +161,24 @@ namespace memman {
       auto New(Args&&... args) -> Pointer<Tobj> {
         Tobj* new_obj = nullptr;
         try {
+          std::cout << "finding mem chunk\n";
           for (auto chunk : chunk_list_) {
             auto iter = chunk.Allocate(std::forward<Args>(args)...);
+            std::cout << "Allocated ptr\n";
             new_obj = iter.GetPointer();
+            std::cout << "Assigned ptr\n";
             if (new_obj != nullptr) {
               Pointer<Tobj> ret(iter.GetPointer());
               ret.cnt_ctrlr_ = iter.GetCntCtrl();
+              std::cout << "Returning ptr\n";
               return ret;
             }
           }
         }
-        catch (MemChunkException e) {
+        catch (MemChunkException& e) {
+          std::cout << "Did not find mem chunk\n";
+          std::cout << "Creating new mem chunk\n";
+          std::cout << e.what() << std::endl;
           if (new_obj == nullptr) {
             chunk_list_.emplace_back();
             auto iter = chunk_list_.back().Allocate(std::forward<Args>(args)...);
@@ -183,6 +187,7 @@ namespace memman {
             return ret;
           }
           else {
+            std::cerr << "Shouldn't be here\n";
             assert(false);
           }
         }
@@ -192,6 +197,7 @@ namespace memman {
       std::list<MemoryChunk<Tobj>> chunk_list_;
 
       MemoryManager() {
+        chunk_list_.emplace_back();
         MemoryObserver::Get().RegisterObserver(
           [this]() {
             return CHUNK_SIZE * sizeof(Tobj) * chunk_list_.size();
@@ -210,18 +216,21 @@ namespace memman {
   template <typename Tobj>
   class Pointer {
   public:
-    Pointer(Tobj* obj) : ptr_(obj) {}
+    Pointer(Tobj* obj = nullptr) : ptr_(obj) {}
     Pointer(const Pointer& _obj) {
       ptr_ = _obj.ptr_;
-      cnt_ctrlr_(-1);
+      if (ptr_ != nullptr)
+        cnt_ctrlr_(-1);
       _obj.cnt_ctrlr_(1);
       cnt_ctrlr_ = _obj.cnt_ctrlr_;
     }
     Pointer(Pointer&& _obj) {
       ptr_ = _obj.ptr_;
-      cnt_ctrlr_(-1);
+      if (ptr_ != nullptr)
+        cnt_ctrlr_(-1);
       cnt_ctrlr_ = _obj.cnt_ctrlr_;
     }
+    ~Pointer() = default;
 
     auto Get() const -> Tobj& { return *ptr_; }
     auto Get() -> Tobj& { return *ptr_; }
