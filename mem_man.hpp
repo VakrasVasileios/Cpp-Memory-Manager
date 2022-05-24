@@ -42,7 +42,7 @@ namespace memman {
       MemChunkException() = default;
       ~MemChunkException() override = default;
 
-      const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW override { return "Memory Chunk full"; }
+      const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW override { return "Memory Chunk full Exception"; }
     };
 
     template<class Tobj>
@@ -55,14 +55,15 @@ namespace memman {
       MemoryChunk() {
         // std::cout << "chunk_size: " << CHUNK_SIZE << std::endl;
         for (int i = 0; i < CHUNK_SIZE; i++) {
+          free_space_.emplace_back(i);
           chunk_[i] = nullptr;
           counters_[i] = 0;
           cnt_ctrl_[i] = [this, i](int op) {
             static int index = i;
             counters_[index] += op;
           };
-          free_space_.emplace_back(i);
         }
+        assert(std::all_of(std::begin(cnt_ctrl_), std::end(cnt_ctrl_), [](const auto& f) {return f != nullptr;}));
       }
       ~MemoryChunk() {
         for (int i = 0; i < CHUNK_SIZE; i++) {
@@ -73,8 +74,10 @@ namespace memman {
 
       template<typename... Args>
       auto Allocate(Args&&... args) -> Iterator {
+        std::cout << "free_space size: " << free_space_.size() << std::endl;
         if (!free_space_.empty()) {
           int index = free_space_.front();
+          std::cout << "free index is: " << index << std::endl;
           if (chunk_[index] != nullptr) {
             Tobj obj(args...);
             *(chunk_[index]) = obj;
@@ -85,6 +88,8 @@ namespace memman {
           counters_[index] = 1;
 
           free_space_.pop_front();
+          std::cout << "free_space size after pop: " << free_space_.size() << std::endl;
+
           managed_space_.push_back(index);
 
           return Iterator(chunk_[index], counters_[index], cnt_ctrl_[index]);
@@ -161,24 +166,23 @@ namespace memman {
       auto New(Args&&... args) -> Pointer<Tobj> {
         Tobj* new_obj = nullptr;
         try {
-          std::cout << "finding mem chunk\n";
-          for (auto chunk : chunk_list_) {
-            auto iter = chunk.Allocate(std::forward<Args>(args)...);
-            std::cout << "Allocated ptr\n";
-            new_obj = iter.GetPointer();
-            std::cout << "Assigned ptr\n";
-            if (new_obj != nullptr) {
-              Pointer<Tobj> ret(iter.GetPointer());
-              ret.cnt_ctrlr_ = iter.GetCntCtrl();
-              std::cout << "Returning ptr\n";
-              return ret;
-            }
+          std::cout << "Finding mem chunk\n";
+          auto& chunk = chunk_list_.back();
+          auto iter = chunk.Allocate(std::forward<Args>(args)...);
+          std::cout << "Allocated ptr\n";
+          new_obj = iter.GetPointer();
+          std::cout << "Assigned ptr\n";
+          if (new_obj != nullptr) {
+            Pointer<Tobj> ret(iter.GetPointer());
+            ret.cnt_ctrlr_ = iter.GetCntCtrl();
+            std::cout << "Returning ptr\n";
+            return ret;
           }
         }
         catch (MemChunkException& e) {
-          std::cout << "Did not find mem chunk\n";
-          std::cout << "Creating new mem chunk\n";
-          std::cout << e.what() << std::endl;
+          std::cout << "\tDid not find mem chunk\n";
+          std::cout << "\tCreating new mem chunk\n";
+          std::cout << '\t' << e.what() << std::endl;
           if (new_obj == nullptr) {
             chunk_list_.emplace_back();
             auto iter = chunk_list_.back().Allocate(std::forward<Args>(args)...);
@@ -219,18 +223,16 @@ namespace memman {
     Pointer(Tobj* obj = nullptr) : ptr_(obj) {}
     Pointer(const Pointer& _obj) {
       ptr_ = _obj.ptr_;
-      if (ptr_ != nullptr)
-        cnt_ctrlr_(-1);
       _obj.cnt_ctrlr_(1);
       cnt_ctrlr_ = _obj.cnt_ctrlr_;
     }
     Pointer(Pointer&& _obj) {
       ptr_ = _obj.ptr_;
-      if (ptr_ != nullptr)
-        cnt_ctrlr_(-1);
       cnt_ctrlr_ = _obj.cnt_ctrlr_;
     }
-    ~Pointer() = default;
+    ~Pointer() {
+      cnt_ctrlr_(-1);
+    }
 
     auto Get() const -> Tobj& { return *ptr_; }
     auto Get() -> Tobj& { return *ptr_; }
