@@ -3,7 +3,7 @@
 #include <list>
 #include <functional>
 #include <assert.h>
-#include <tuple>
+#include <exception>
 
 using size_t = unsigned long;
 
@@ -18,8 +18,8 @@ using size_t = unsigned long;
 #define MB 1000000
 #define MEM_SIZE HEAP_SIZE * MB
 
-#if defined(MEM_THRESH) > 100
-#define MEM_THRESH 100
+#if defined(MEM_THRESH) > 90
+#define MEM_THRESH 90
 #endif
 
 #if defined(MEM_THRESH) < 0
@@ -37,12 +37,22 @@ namespace memman {
 
   namespace {
 
+    class MemChunkException : public std::exception {
+    public:
+      MemChunkException() = default;
+      ~MemChunkException() override = default;
+
+      const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW override { return "Memory Chunk full"; }
+    };
+
     template<class Tobj>
     class MemoryChunk final {
     public:
       using CountControler = std::function<void(int)>;
+      class Iterator;
     public:
       MemoryChunk() {
+        // std::cout << "chunk_size: " << CHUNK_SIZE << std::endl;
         for (int i = 0; i < CHUNK_SIZE; i++) {
           chunk_[i] = nullptr;
           counters_[i] = 0;
@@ -61,7 +71,7 @@ namespace memman {
       }
 
       template<typename... Args>
-      auto Allocate(Args&&... args) -> Tobj* {
+      auto Allocate(Args&&... args) -> Iterator {
         if (!free_space_.empty()) {
           auto iter = free_space_.front();
           if (chunk_[iter.Get()] != nullptr) {
@@ -76,11 +86,10 @@ namespace memman {
           free_space_.pop_front();
           managed_space_.push_back(iter);
 
-          return chunk_[iter.Get()];
+          return iter;
         }
         else
-          // return nullptr so that the manager creates a new memory chunk
-          return nullptr;
+          throw MemChunkException();
       }
 
       bool IsFull(void) { return managed_space_.size() == CHUNK_SIZE ? true : false; }
@@ -94,15 +103,19 @@ namespace memman {
 
         auto Get() const -> const int { return index_; }
 
+        auto GetPointer(void) -> Tobj* { return chunk_[index_]; }
         auto GetCount(void) const -> size_t { return counters_[index_]; }
+        auto GetCntCtrl(void) const -> CountControler& { return cnt_ctrl_[index_]; }
+
         void IncreaseCount(void) { ++(counters_[index_]); }
         void DecreaseCount(void) { --(counters_[index_]); }
 
       private:
-        int index_;
+        const int index_;
       };
 
-      friend Iterator;
+      friend class Iterator;
+
     private:
       Tobj* chunk_[CHUNK_SIZE];
       size_t counters_[CHUNK_SIZE];
@@ -129,7 +142,11 @@ namespace memman {
       size_t mem_size_ = MEM_SIZE; // soft max
       size_t mem_used_cache_ = 0;
 
-      MemoryObserver() = default;
+      MemoryObserver() {
+        // std::cout << "mem_size: " << MEM_SIZE
+        //   << "\nmem_thresh: " << MEM_THRESH
+        //   << std::endl;
+      }
       MemoryObserver(const MemoryObserver&) = delete;
       MemoryObserver(MemoryObserver&&) = delete;
       ~MemoryObserver() = default;
@@ -146,20 +163,28 @@ namespace memman {
       template<typename... Args>
       auto New(Args&&... args) -> Pointer<Tobj> {
         Tobj* new_obj = nullptr;
-        for (auto chunk : chunk_list_) {
-          new_obj = chunk.Allocate(std::forward<Args>(args)...);
-          if (new_obj != nullptr) {
-            Pointer<Tobj> ret(new_obj); // TODO: pass count controler funcs
-            return ret;
+        try {
+          for (auto chunk : chunk_list_) {
+            auto iter = chunk.Allocate(std::forward<Args>(args)...);
+            new_obj = iter.GetPointer();
+            if (new_obj != nullptr) {
+              Pointer<Tobj> ret(iter.GetPointer());
+              ret.cnt_ctrlr_ = iter.GetCntCtrl();
+              return ret;
+            }
           }
         }
-        if (new_obj == nullptr) {
-          chunk_list_.emplace_back();
-          new_obj = chunk_list_.back().Allocate(std::forward<Args>(args)...);
-          return Pointer<Tobj>(new_obj);
-        }
-        else {
-          assert(false);
+        catch (MemChunkException e) {
+          if (new_obj == nullptr) {
+            chunk_list_.emplace_back();
+            auto iter = chunk_list_.back().Allocate(std::forward<Args>(args)...);
+            Pointer<Tobj> ret(iter.GetPointer());
+            ret.cnt_ctrlr_ = iter.GetCntCtrl();
+            return ret;
+          }
+          else {
+            assert(false);
+          }
         }
       }
 
