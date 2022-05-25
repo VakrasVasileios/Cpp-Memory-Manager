@@ -154,7 +154,7 @@ namespace memman {
         size_t mem = 0;
         for (auto& obs : observers_)
           mem += obs();
-        SweepIfThreshold(mem >= MEM_THRESH);
+        SweepIfThreshold(mem >= static_cast<double>(MEM_THRESH / 100) * MEM_SIZE);
         return mem + size > MEM_SIZE ? false : true;
       }
 
