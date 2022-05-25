@@ -162,7 +162,7 @@ namespace memman {
       std::list<ObserverFunc> observers_;
       std::list<ManagerSweeper> sweepers_;
 
-      size_t mem_size_ = MEM_SIZE; // soft max
+      size_t mem_size_ = MEM_SIZE; // Hard max
       size_t mem_used_cache_ = 0;
 
       void SweepIfThreshold(bool reached) {
@@ -215,7 +215,10 @@ namespace memman {
           std::cout << "\tCreating new mem chunk\n";
           std::cout << '\t' << e.what() << std::endl;
           if (new_obj == nullptr) {
-            chunk_list_.emplace_back();
+#ifdef HEAP_SIZE
+            if (MemoryObserver::Get().CanRequestMemory(sizeof(Tobj) * CHUNK_SIZE))
+#endif
+              chunk_list_.emplace_back();
             auto iter = chunk_list_.back().Allocate(std::forward<Args>(args)...);
             Pointer<Tobj> ret(iter.GetPointer());
             ret.cnt_ctrlr_ = iter.GetCntCtrl();
@@ -230,6 +233,14 @@ namespace memman {
 
     private:
       std::list<MemoryChunk<Tobj>> chunk_list_;
+
+      auto FindNonFullChunk(void) -> MemoryChunk<Tobj>& {
+        for (auto& chunk : chunk_list_) {
+          if (!chunk.IsFull())
+            return chunk;
+        }
+
+      }
 
       MemoryManager() {
         chunk_list_.emplace_back();
