@@ -4,6 +4,7 @@
 #include <functional>
 #include <assert.h>
 #include <exception>
+#include <algorithm>
 
 using size_t = unsigned long;
 
@@ -11,12 +12,10 @@ using size_t = unsigned long;
 #define CHUNK_SIZE 10
 #endif
 
-#ifndef HEAP_SIZE
-#define HEAP_SIZE 1024
-#endif
-
+#ifdef HEAP_SIZE
 #define MB 1000000
 #define MEM_SIZE HEAP_SIZE * MB
+#endif
 
 #if defined(MEM_THRESH) > 90
 #define MEM_THRESH 90
@@ -94,7 +93,19 @@ namespace memman {
 
           return Iterator(chunk_[index], counters_[index], cnt_ctrl_[index]);
         }
+        else // if the chunk is full find and move 0 ref count pointer to free space
+          SweepManagedMem();
         throw MemChunkException();
+      }
+
+      void SweepManagedMem(void) {
+        for (int i = 0; i < CHUNK_SIZE; i++) {
+          if (counters_[i] == 0) {
+            auto iter = std::find(managed_space_.begin(), managed_space_.end(), i);
+            free_space_.push_back(*iter);
+            managed_space_.erase(iter);
+          }
+        }
       }
 
       bool IsFull(void) { return managed_space_.size() == CHUNK_SIZE ? true : false; }
@@ -125,9 +136,11 @@ namespace memman {
       std::list<int> managed_space_;
     };
 
+#ifdef HEAP_SIZE
     class MemoryObserver final {
     public:
       using ObserverFunc = std::function<size_t(void)>;
+      using ManagerSweeper = std::function<void(void)>;
     public:
       static auto Get(void) -> MemoryObserver& {
         static MemoryObserver singleton;
@@ -135,12 +148,29 @@ namespace memman {
       }
 
       void RegisterObserver(const ObserverFunc& f) { observers_.push_back(f); }
-      void SweepIfThreshold(void) {}
+      void RegisterSweeper(const ManagerSweeper& f) { sweepers_.push_back(f); }
+
+      bool CanRequestMemory(size_t size) {
+        size_t mem = 0;
+        for (auto& obs : observers_)
+          mem += obs();
+        SweepIfThreshold(mem >= MEM_THRESH);
+        return mem + size > MEM_SIZE ? false : true;
+      }
 
     private:
       std::list<ObserverFunc> observers_;
+      std::list<ManagerSweeper> sweepers_;
+
       size_t mem_size_ = MEM_SIZE; // soft max
       size_t mem_used_cache_ = 0;
+
+      void SweepIfThreshold(bool reached) {
+        if (reached) {
+          for (auto& sweeper : sweepers_)
+            sweeper();
+        }
+      }
 
       MemoryObserver() {
         // std::cout << "mem_size: " << MEM_SIZE
@@ -153,6 +183,7 @@ namespace memman {
         observers_.clear();
       };
     };
+#endif
 
     template <class Tobj>
     class MemoryManager final {
@@ -202,11 +233,19 @@ namespace memman {
 
       MemoryManager() {
         chunk_list_.emplace_back();
+#ifdef HEAP_SIZE
         MemoryObserver::Get().RegisterObserver(
           [this]() {
             return CHUNK_SIZE * sizeof(Tobj) * chunk_list_.size();
           }
         );
+        MemoryObserver::Get().RegisterSweeper(
+          [this]() {
+            for (auto& chunk : chunk_list_)
+              chunk.SweepManagedMem();
+          }
+        );
+#endif
       }
       MemoryManager(const MemoryManager&) = delete;
       MemoryManager(MemoryManager&&) = delete;
