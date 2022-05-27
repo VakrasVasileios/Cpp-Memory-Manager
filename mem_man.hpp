@@ -36,12 +36,28 @@ namespace memman {
 
   namespace {
 
-    class MemChunkException : public std::exception {
+    class MemoryException : public std::exception {
     public:
-      MemChunkException() = default;
-      ~MemChunkException() override = default;
+      MemoryException() = default;
+      ~MemoryException() override = default;
 
-      virtual const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW override { return "Memory Chunk full Exception"; }
+      virtual const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW { return "Memory might be full"; }
+    };
+
+    class MemChunkFullException : public MemoryException {
+    public:
+      MemChunkFullException() = default;
+      ~MemChunkFullException() override = default;
+
+      virtual const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW { return "Memory chunk is full"; }
+    };
+
+    class UnavailableChunksException : public MemoryException {
+    public:
+      UnavailableChunksException() = default;
+      ~UnavailableChunksException() override = default;
+
+      virtual const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW { return "No non full memory chunk available"; }
     };
 
     template<class Tobj>
@@ -95,7 +111,7 @@ namespace memman {
         }
         else // if the chunk is full find and move 0 ref count pointer to free space
           SweepManagedMem();
-        throw MemChunkException();
+        throw MemChunkFullException();
       }
 
       void SweepManagedMem(void) {
@@ -211,7 +227,7 @@ namespace memman {
             return ret;
           }
         }
-        catch (MemChunkException& e) {
+        catch (MemChunkFullException& e) {
           std::cout << "\tDid not find mem chunk\n";
           std::cout << "\tCreating new mem chunk\n";
           std::cout << '\t' << e.what() << std::endl;
@@ -240,7 +256,7 @@ namespace memman {
           if (!chunk.IsFull())
             return chunk;
         }
-
+        throw UnavailableChunksException();
       }
 
       MemoryManager() {
