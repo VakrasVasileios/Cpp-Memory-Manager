@@ -100,6 +100,9 @@ namespace memman {
           if (chunk_[i] != nullptr)
             delete chunk_[i];
         }
+        delete[] chunk_;
+        delete[] counters_;
+        delete[] cnt_ctrl_;
       }
 
       template<typename... Args>
