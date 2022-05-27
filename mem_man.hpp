@@ -90,9 +90,10 @@ namespace memman {
 
     public:
       MemoryChunk() {
-        // std::cout << "chunk_size: " << CHUNK_SIZE << std::endl;
+        // std::cout << "chunk_size: " << chunk_size_ << std::endl;
         Init();
-        assert(std::all_of(std::begin(cnt_ctrl_), std::end(cnt_ctrl_), [](const auto& f) {return f != nullptr;}));
+        for (size_t i = 0; i < chunk_size_; i++)
+          assert(cnt_ctrl_[i] != nullptr);
       }
       ~MemoryChunk() {
         for (int i = 0; i < chunk_size_; i++) {
