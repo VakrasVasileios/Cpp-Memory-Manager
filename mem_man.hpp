@@ -27,6 +27,10 @@ using size_t = unsigned long;
 #define CHUNK_SIZE 128 * KB
 #endif
 
+#if defined(CHUNK_POPULATION) && (defined(CHUNK_SIZE_KB) || defined(CHUNK_SIZE_MB))
+#error CHUNK_POPULATION cannot be used in tandum with CHUNK_SIZE_KB or CHUNK_SIZE_MB
+#endif
+
 #ifdef HEAP_SIZE_MB
 #define MEM_SIZE HEAP_SIZE_MB * MB
 #endif
@@ -36,15 +40,15 @@ using size_t = unsigned long;
 #endif
 
 #if defined(MEM_THRESH) > 90
-#define MEM_THRESH 90
+#define THRESH 90
 #endif
 
 #if defined(MEM_THRESH) < 0
-#define MEM_THRESH 25
+#define THRESH 25
 #endif
 
 #ifndef MEM_THRESH
-#define MEM_THRESH 60
+#define THRESH 80
 #endif
 
 namespace memman {
@@ -200,9 +204,9 @@ namespace memman {
         size_t mem = 0;
         for (auto& obs : observers_)
           mem += obs();
-        SweepIfThreshold(mem >= static_cast<double>(MEM_THRESH / 100) * MEM_SIZE);
+        SweepIfThreshold(mem >= static_cast<double>(THRESH / 100) * MEM_SIZE);
         return mem + size > MEM_SIZE ? false : true;
-    }
+      }
 #endif
       void SweepMemory(void) { SweepIfThreshold(true); }
 
@@ -223,7 +227,7 @@ namespace memman {
 
       MemoryObserver() {
         // std::cout << "mem_size: " << MEM_SIZE
-        //   << "\nmem_thresh: " << MEM_THRESH
+        //   << "\nmem_thresh: " << THRESH
         //   << std::endl;
       }
       MemoryObserver(const MemoryObserver&) = delete;
@@ -231,7 +235,7 @@ namespace memman {
       ~MemoryObserver() {
         observers_.clear();
       };
-  };
+    };
 
     template <class Tobj>
     class MemoryManager final {
@@ -311,7 +315,7 @@ namespace memman {
       }
     };
 
-} // namespace
+  } // namespace
 
   template <typename Tobj>
   class Pointer {
