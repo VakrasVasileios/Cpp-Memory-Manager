@@ -8,13 +8,27 @@
 
 using size_t = unsigned long;
 
-#ifndef CHUNK_SIZE
-#define CHUNK_SIZE 10
+#define KB 1000
+#define MB 1000000
+
+#ifdef CHUNK_SIZE_KB
+#define CHUNK_SIZE CHUNK_SIZE_KB * KB
 #endif
 
-#ifdef HEAP_SIZE
-#define MB 1000000
-#define MEM_SIZE HEAP_SIZE * MB
+#ifdef CHUNK_SIZE_MB
+#define CHUNK_SIZE CHUNK_SIZE_MB * MB
+#endif
+
+#if !defined(CHUNK_SIZE_KB) && !defined(CHUNK_SIZE_MB)
+#define CHUNK_SIZE 128 * KB
+#endif
+
+#ifdef HEAP_SIZE_MB
+#define MEM_SIZE HEAP_SIZE_MB * MB
+#endif
+
+#ifdef HEAP_SIZE_KB
+#define MEM_SIZE HEAP_SIZE_KB * KB
 #endif
 
 #if defined(MEM_THRESH) > 90
@@ -200,7 +214,7 @@ namespace memman {
       ~MemoryObserver() {
         observers_.clear();
       };
-    };
+      };
 
     template <class Tobj>
     class MemoryManager final {
@@ -280,7 +294,7 @@ namespace memman {
       }
     };
 
-  } // namespace
+    } // namespace
 
   template <typename Tobj>
   class Pointer {
@@ -338,4 +352,4 @@ namespace memman {
 
 
 
-} // namespace memman
+  } // namespace memman
