@@ -11,6 +11,10 @@ using size_t = unsigned long;
 #define KB 1000
 #define MB 1000000
 
+#ifdef CHUNK_POPULATION
+#define CHUNK_POP CHUNK_POPULATION
+#endif
+
 #ifdef CHUNK_SIZE_KB
 #define CHUNK_SIZE CHUNK_SIZE_KB * KB
 #endif
@@ -83,19 +87,11 @@ namespace memman {
     public:
       MemoryChunk() {
         // std::cout << "chunk_size: " << CHUNK_SIZE << std::endl;
-        for (int i = 0; i < CHUNK_SIZE; i++) {
-          free_space_.emplace_back(i);
-          chunk_[i] = nullptr;
-          counters_[i] = 0;
-          cnt_ctrl_[i] = [this, i](int op) {
-            static int index = i;
-            counters_[index] += op;
-          };
-        }
+        Init();
         assert(std::all_of(std::begin(cnt_ctrl_), std::end(cnt_ctrl_), [](const auto& f) {return f != nullptr;}));
       }
       ~MemoryChunk() {
-        for (int i = 0; i < CHUNK_SIZE; i++) {
+        for (int i = 0; i < chunk_size_; i++) {
           if (chunk_[i] != nullptr)
             delete chunk_[i];
         }
@@ -158,12 +154,33 @@ namespace memman {
       };
 
     private:
-      Tobj* chunk_[CHUNK_SIZE];
-      size_t counters_[CHUNK_SIZE];
-      CountControler cnt_ctrl_[CHUNK_SIZE];
+#if defined(CHUNK_POP)
+      size_t chunk_size_ = CHUNK_POP;
+#else
+      size_t chunk_size_ = CHUNK_SIZE / sizeof(Tobj);
+#endif
+      Tobj** chunk_;
+      size_t* counters_;
+      CountControler* cnt_ctrl_;
 
       std::list<int> free_space_;
       std::list<int> managed_space_;
+
+      void Init() {
+        chunk_ = new Tobj * [chunk_size_];
+        counters_ = new size_t[chunk_size_];
+        cnt_ctrl_ = new CountControler[chunk_size_];
+        for (int i = 0; i < chunk_size_; i++) {
+          free_space_.emplace_back(i);
+          chunk_[i] = nullptr;
+          counters_[i] = 0;
+          cnt_ctrl_[i] = [this, i](int op) {
+            static int index = i;
+            counters_[index] += op;
+          };
+        }
+      }
+
     };
 
     class MemoryObserver final {
@@ -185,7 +202,7 @@ namespace memman {
           mem += obs();
         SweepIfThreshold(mem >= static_cast<double>(MEM_THRESH / 100) * MEM_SIZE);
         return mem + size > MEM_SIZE ? false : true;
-      }
+    }
 #endif
       void SweepMemory(void) { SweepIfThreshold(true); }
 
@@ -214,7 +231,7 @@ namespace memman {
       ~MemoryObserver() {
         observers_.clear();
       };
-      };
+  };
 
     template <class Tobj>
     class MemoryManager final {
@@ -294,7 +311,7 @@ namespace memman {
       }
     };
 
-    } // namespace
+} // namespace
 
   template <typename Tobj>
   class Pointer {
@@ -352,4 +369,4 @@ namespace memman {
 
 
 
-  } // namespace memman
+} // namespace memman
