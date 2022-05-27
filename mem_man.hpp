@@ -41,7 +41,7 @@ namespace memman {
       MemChunkException() = default;
       ~MemChunkException() override = default;
 
-      const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW override { return "Memory Chunk full Exception"; }
+      virtual const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW override { return "Memory Chunk full Exception"; }
     };
 
     template<class Tobj>
@@ -136,7 +136,6 @@ namespace memman {
       std::list<int> managed_space_;
     };
 
-#ifdef HEAP_SIZE
     class MemoryObserver final {
     public:
       using ObserverFunc = std::function<size_t(void)>;
@@ -149,7 +148,7 @@ namespace memman {
 
       void RegisterObserver(const ObserverFunc& f) { observers_.push_back(f); }
       void RegisterSweeper(const ManagerSweeper& f) { sweepers_.push_back(f); }
-
+#ifdef HEAP_SIZE
       bool CanRequestMemory(size_t size) {
         size_t mem = 0;
         for (auto& obs : observers_)
@@ -157,13 +156,16 @@ namespace memman {
         SweepIfThreshold(mem >= static_cast<double>(MEM_THRESH / 100) * MEM_SIZE);
         return mem + size > MEM_SIZE ? false : true;
       }
+#endif
+      void SweepMemory(void) { SweepIfThreshold(true); }
 
     private:
       std::list<ObserverFunc> observers_;
       std::list<ManagerSweeper> sweepers_;
 
+#ifdef HEAP_SIZE
       size_t mem_size_ = MEM_SIZE; // Hard max
-      size_t mem_used_cache_ = 0;
+#endif
 
       void SweepIfThreshold(bool reached) {
         if (reached) {
@@ -183,7 +185,6 @@ namespace memman {
         observers_.clear();
       };
     };
-#endif
 
     template <class Tobj>
     class MemoryManager final {
@@ -244,7 +245,6 @@ namespace memman {
 
       MemoryManager() {
         chunk_list_.emplace_back();
-#ifdef HEAP_SIZE
         MemoryObserver::Get().RegisterObserver(
           [this]() {
             return CHUNK_SIZE * sizeof(Tobj) * chunk_list_.size();
@@ -256,7 +256,6 @@ namespace memman {
               chunk.SweepManagedMem();
           }
         );
-#endif
       }
       MemoryManager(const MemoryManager&) = delete;
       MemoryManager(MemoryManager&&) = delete;
@@ -304,7 +303,23 @@ namespace memman {
     CountCtrl cnt_ctrlr_;
   };
 
+  /**
+   * @brief Allocates memory for the object and returns a pointer to it through a wrapper.
+   *
+   * @tparam Tobj Type of object to be allocated.
+   * @tparam Args Constructor arguments for the object.
+   * @param args Constructor arguments.
+   * @return Pointer<Tobj> The Wrapper containing the allocated pointer.
+   */
   template<typename Tobj, typename... Args>
   auto make_pointer(Args&&... args) -> Pointer<Tobj> { return MemoryManager<Tobj>::Get().New(std::forward<Args>(args)...); }
+
+  /**
+   * @brief Orders a sweep of the memory.
+   *
+   */
+  void sweep_memory(void) { MemoryObserver::Get().SweepMemory(); }
+
+
 
 } // namespace memman
