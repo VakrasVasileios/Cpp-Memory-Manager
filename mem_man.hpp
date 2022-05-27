@@ -108,32 +108,27 @@ namespace memman {
       template<typename... Args>
       auto Allocate(Args&&... args) -> Iterator {
         std::cout << "free_space size: " << free_space_.size() << std::endl;
-        if (!free_space_.empty()) {
-          int index = free_space_.front();
-          std::cout << "free index is: " << index << std::endl;
-          if (chunk_[index] != nullptr) {
-            Tobj obj(args...);
-            *(chunk_[index]) = obj;
-          }
-          else {
-            chunk_[index] = new Tobj(std::forward<Args>(args)...);
-          }
-          counters_[index] = 1;
-
-          free_space_.pop_front();
-          std::cout << "free_space size after pop: " << free_space_.size() << std::endl;
-
-          managed_space_.push_back(index);
-
-          return Iterator(chunk_[index], counters_[index], cnt_ctrl_[index]);
+        int index = free_space_.front();
+        std::cout << "free index is: " << index << std::endl;
+        if (chunk_[index] != nullptr) {
+          Tobj obj(args...);
+          *(chunk_[index]) = obj;
         }
-        else // if the chunk is full find and move 0 ref count pointer to free space
-          SweepManagedMem();
-        throw MemChunkFullException();
+        else {
+          chunk_[index] = new Tobj(std::forward<Args>(args)...);
+        }
+        counters_[index] = 1;
+
+        free_space_.pop_front();
+        std::cout << "free_space size after pop: " << free_space_.size() << std::endl;
+
+        managed_space_.push_back(index);
+
+        return Iterator(chunk_[index], counters_[index], cnt_ctrl_[index]);
       }
 
       void SweepManagedMem(void) {
-        for (int i = 0; i < CHUNK_SIZE; i++) {
+        for (int i = 0; i < chunk_size_; i++) {
           if (counters_[i] == 0) {
             auto iter = std::find(managed_space_.begin(), managed_space_.end(), i);
             free_space_.push_back(*iter);
@@ -142,7 +137,7 @@ namespace memman {
         }
       }
 
-      bool IsFull(void) { return managed_space_.size() == CHUNK_SIZE ? true : false; }
+      bool IsFull(void) { return managed_space_.size() == chunk_size_ ? true : false; }
       bool IsEmpty(void) { return managed_space_.size() == 0; }
       auto Size(void) -> size_t { return managed_space_.size(); }
 
@@ -254,22 +249,16 @@ namespace memman {
         Tobj* new_obj = nullptr;
         try {
           std::cout << "Finding mem chunk\n";
-          auto& chunk = chunk_list_.back();
+          auto& chunk = FindNonFullChunk();
           auto iter = chunk.Allocate(std::forward<Args>(args)...);
-          std::cout << "Allocated ptr\n";
           new_obj = iter.GetPointer();
-          std::cout << "Assigned ptr\n";
-          if (new_obj != nullptr) {
-            Pointer<Tobj> ret(iter.GetPointer());
-            ret.cnt_ctrlr_ = iter.GetCntCtrl();
-            std::cout << "Returning ptr\n";
-            return ret;
-          }
+          Pointer<Tobj> ret(iter.GetPointer());
+          ret.cnt_ctrlr_ = iter.GetCntCtrl();
+          return ret;
         }
-        catch (MemChunkFullException& e) {
-          std::cout << "\tDid not find mem chunk\n";
-          std::cout << "\tCreating new mem chunk\n";
+        catch (MemoryException& e) {
           std::cout << '\t' << e.what() << std::endl;
+          std::cout << "\tCreating new mem chunk\n";
           if (new_obj == nullptr) {
 #ifdef HEAP_SIZE
             if (MemoryObserver::Get().CanRequestMemory(sizeof(Tobj) * CHUNK_SIZE))
