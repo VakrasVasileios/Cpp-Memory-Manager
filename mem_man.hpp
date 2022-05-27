@@ -28,7 +28,7 @@ using size_t = unsigned long;
 #endif
 
 #if defined(CHUNK_POPULATION) && (defined(CHUNK_SIZE_KB) || defined(CHUNK_SIZE_MB))
-#error CHUNK_POPULATION cannot be used in tandum with CHUNK_SIZE_KB or CHUNK_SIZE_MB
+#error CHUNK_POPULATION flag cannot be used in tandum with CHUNK_SIZE_KB or CHUNK_SIZE_MB flag
 #endif
 
 #ifdef HEAP_SIZE_MB
