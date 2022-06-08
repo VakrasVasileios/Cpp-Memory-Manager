@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <exception>
 #include <algorithm>
+#include <iostream>
+#include <typeinfo>
 
 using size_t = unsigned long;
 
@@ -40,15 +42,15 @@ using size_t = unsigned long;
 #endif
 
 #if defined(MEM_THRESH) > 90
-#define THRESH 90
+#define THRESHOLD 90
 #endif
 
 #if defined(MEM_THRESH) < 0
-#define THRESH 25
+#define THRESHOLD 50
 #endif
 
 #ifndef MEM_THRESH
-#define THRESH 80
+#define THRESHOLD 80
 #endif
 
 namespace memman {
@@ -90,7 +92,6 @@ namespace memman {
 
     public:
       MemoryChunk() {
-        // std::cout << "chunk_size: " << chunk_size_ << std::endl;
         Init();
         for (size_t i = 0; i < chunk_size_; i++)
           assert(cnt_ctrl_[i] != nullptr);
@@ -128,10 +129,10 @@ namespace memman {
       }
 
       void SweepManagedMem(void) {
-        for (int i = 0; i < chunk_size_; i++) {
+        for (int i = 0; i < chunk_size_ && !managed_space_.empty(); i++) {
           if (counters_[i] == 0) {
             auto iter = std::find(managed_space_.begin(), managed_space_.end(), i);
-            free_space_.push_back(*iter);
+            free_space_.emplace_back(*iter);
             managed_space_.erase(iter);
           }
         }
@@ -156,6 +157,14 @@ namespace memman {
         const CountControler& ctrl_;
       };
 
+      friend auto operator<<(std::ostream& os, const MemoryChunk& ch) -> std::ostream& {
+        for (int i = 0; i < ch.chunk_size_; i++) {
+          bool free = std::find(ch.free_space_.begin(), ch.free_space_.end(), i) != ch.free_space_.end();
+          os << typeid(ch.chunk_[i]).name() << "   " << ch.chunk_[i] << "   " << ch.counters_[i] << "   " << free << "   " << !free << '\n';
+        }
+        return os;
+      }
+
     private:
 #if defined(CHUNK_POP)
       size_t chunk_size_ = CHUNK_POP;
@@ -178,8 +187,7 @@ namespace memman {
           chunk_[i] = nullptr;
           counters_[i] = 0;
           cnt_ctrl_[i] = [this, i](int op) {
-            static int index = i;
-            counters_[index] += op;
+            counters_[i] += op;
           };
         }
       }
@@ -190,6 +198,7 @@ namespace memman {
     public:
       using ObserverFunc = std::function<size_t(void)>;
       using ManagerSweeper = std::function<void(void)>;
+      using Printer = std::function<void(void)>;
     public:
       static auto Get(void) -> MemoryObserver& {
         static MemoryObserver singleton;
@@ -198,20 +207,28 @@ namespace memman {
 
       void RegisterObserver(const ObserverFunc& f) { observers_.push_back(f); }
       void RegisterSweeper(const ManagerSweeper& f) { sweepers_.push_back(f); }
-#ifdef HEAP_SIZE
+      void RegisterPrint(const Printer& f) { printers_.push_back(f); }
+#ifdef HEAP_SIZE // FIXME: Something is weird here 
       bool CanRequestMemory(size_t size) {
         size_t mem = 0;
         for (auto& obs : observers_)
           mem += obs();
-        SweepIfThreshold(mem >= static_cast<double>(THRESH / 100) * MEM_SIZE);
+        std::cout << "\t Memory before Sweep request: " << mem << '\n';
+        SweepIfThreshold(mem >= THRESHOLD / 100 * MEM_SIZE);
         return mem + size > MEM_SIZE ? false : true;
       }
 #endif
       void SweepMemory(void) { SweepIfThreshold(true); }
+      void PrintMemory(void) {
+        std::cout << "Type  |    Address    | Counter | Free | Managed\n";
+        for (auto& printer : printers_)
+          printer();
+      }
 
     private:
       std::list<ObserverFunc> observers_;
       std::list<ManagerSweeper> sweepers_;
+      std::list<Printer> printers_;
 
 #ifdef HEAP_SIZE
       size_t mem_size_ = MEM_SIZE; // Hard max
@@ -226,7 +243,7 @@ namespace memman {
 
       MemoryObserver() {
         // std::cout << "mem_size: " << MEM_SIZE
-        //   << "\nmem_thresh: " << THRESH
+        //   << "\nmem_thresh: " << THRESHOLD
         //   << std::endl;
       }
       MemoryObserver(const MemoryObserver&) = delete;
@@ -247,33 +264,27 @@ namespace memman {
       template<typename... Args>
       auto New(Args&&... args) -> Pointer<Tobj> {
         Tobj* new_obj = nullptr;
+        MemoryChunk<Tobj>& chunk;
         try {
           std::cout << "Finding mem chunk\n";
-          auto& chunk = FindNonFullChunk();
-          auto iter = chunk.Allocate(std::forward<Args>(args)...);
-          new_obj = iter.GetPointer();
-          Pointer<Tobj> ret(iter.GetPointer());
-          ret.cnt_ctrlr_ = iter.GetCntCtrl();
-          return ret;
+          chunk = FindNonFullChunk();
         }
         catch (MemoryException& e) {
           std::cout << '\t' << e.what() << std::endl;
-          std::cout << "\tCreating new mem chunk\n";
-          if (new_obj == nullptr) {
 #ifdef HEAP_SIZE
-            if (MemoryObserver::Get().CanRequestMemory(sizeof(Tobj) * CHUNK_SIZE))
+          if (MemoryObserver::Get().CanRequestMemory(sizeof(Tobj) * CHUNK_SIZE)) { // FIXME: When Chunk population is selected, program breaks at line 125 
+            std::cout << "\tCreating new mem chunk\n";
+            chunk_list_.emplace_back();
+          }
 #endif
-              chunk_list_.emplace_back();
-            auto iter = chunk_list_.back().Allocate(std::forward<Args>(args)...);
-            Pointer<Tobj> ret(iter.GetPointer());
-            ret.cnt_ctrlr_ = iter.GetCntCtrl();
-            return ret;
-          }
-          else {
-            std::cerr << "Shouldn't be here\n";
-            assert(false);
-          }
+          chunk = FindNonFullChunk();
         }
+        auto iter = chunk.Allocate(std::forward<Args>(args)...);
+        new_obj = iter.GetPointer();
+        Pointer<Tobj> ret(iter.GetPointer());
+        ret.cnt_ctrlr_ = iter.GetCntCtrl();
+
+        return ret;
       }
 
     private:
@@ -300,6 +311,12 @@ namespace memman {
               chunk.SweepManagedMem();
           }
         );
+        MemoryObserver::Get().RegisterPrint(
+          [this]() {
+            for (auto& chunk : chunk_list_)
+              std::cout << chunk << "\n-------------------------------\n";
+          }
+        );
       }
       MemoryManager(const MemoryManager&) = delete;
       MemoryManager(MemoryManager&&) = delete;
@@ -321,6 +338,7 @@ namespace memman {
     }
     Pointer(Pointer&& _obj) {
       ptr_ = _obj.ptr_;
+      _obj.cnt_ctrlr_(1);
       cnt_ctrlr_ = _obj.cnt_ctrlr_;
     }
     ~Pointer() {
@@ -363,7 +381,6 @@ namespace memman {
    *
    */
   void sweep_memory(void) { MemoryObserver::Get().SweepMemory(); }
-
 
 
 } // namespace memman
