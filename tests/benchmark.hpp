@@ -3,6 +3,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <string>
+#include <stack>
 
 #ifdef BENCHMARK
 #define StartTimer(tag)   BenchmarkTimer::Get().Start(tag)
@@ -24,19 +25,20 @@ public:
 
   inline
     void Start(const std::string& tag) {
-    tag_ = tag;
-    start_ = Clock::now();
+    tag_.push(tag);
+    start_.push(Clock::now());
   }
-  inline
-    void End(void) {
+  void End(void) {
     end_ = Clock::now();
-    milliseconds ms = std::chrono::duration_cast<milliseconds>(end_ - start_);
-    tags_n_times_[tag_] += ms.count();
+    milliseconds ms = std::chrono::duration_cast<milliseconds>(end_ - start_.top());
+    start_.pop();
+    tags_n_times_[tag_.top()] += ms.count();
+    tag_.pop();
   }
 
 private:
   std::unordered_map<std::string, double> tags_n_times_;
-  Clock::time_point start_;
+  std::stack<Clock::time_point> start_;
   Clock::time_point end_;
-  std::string tag_;
+  std::stack<std::string> tag_;
 };
