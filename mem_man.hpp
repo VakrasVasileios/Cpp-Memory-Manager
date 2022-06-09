@@ -10,8 +10,8 @@
 
 using size_t = unsigned long;
 
-#define KB 1000
-#define MB 1000000
+#define KB 1024
+#define MB 1048576
 
 #ifdef CHUNK_POPULATION
 #define CHUNK_POP CHUNK_POPULATION
@@ -57,6 +57,12 @@ using size_t = unsigned long;
 #define THRESHOLD 80
 #endif
 
+#ifdef BENCHMARK
+
+#else
+
+#endif
+
 namespace memman {
 
   template <typename Tobj>
@@ -85,7 +91,7 @@ namespace memman {
       UnavailableChunksException() = default;
       ~UnavailableChunksException() override = default;
 
-      virtual const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW { return "No non full memory chunk available"; }
+      virtual const char* what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW { return "No non-full memory chunk available"; }
     };
 
     template<class Tobj>
@@ -112,9 +118,7 @@ namespace memman {
 
       template<typename... Args>
       auto Allocate(Args&&... args) -> Iterator {
-        // std::cout << "free_space size: " << free_space_.size() << std::endl;
         int index = free_space_.front();
-        // std::cout << "free index is: " << index << std::endl;
         if (chunk_[index] != nullptr) {
           Tobj obj(args...);
           *(chunk_[index]) = obj;
@@ -122,12 +126,10 @@ namespace memman {
         else {
           chunk_[index] = new Tobj(std::forward<Args>(args)...);
         }
+
         counters_[index] = 1;
-
         free_space_.pop_front();
-        // std::cout << "free_space size after pop: " << free_space_.size() << std::endl;
-
-        managed_space_.push_back(index);
+        managed_space_.emplace_back(index);
 
         return Iterator(chunk_[index], counters_[index], cnt_ctrl_[index]);
       }
@@ -152,7 +154,7 @@ namespace memman {
         Iterator(Tobj* _obj, size_t _counter, const CountControler& _ctrl) : obj_(_obj), counter_(_counter), ctrl_(_ctrl) {}
         ~Iterator() = default;
 
-        auto GetPointer(void) -> Tobj* { return obj_; }
+        auto GetPointer(void) const -> Tobj* { return obj_; }
         auto GetCount(void) const -> size_t { return counter_; }
         auto GetCntCtrl(void) const -> const CountControler& { return ctrl_; }
 
