@@ -57,11 +57,7 @@ using size_t = unsigned long;
 #define THRESHOLD 80
 #endif
 
-#ifdef BENCHMARK
-
-#else
-
-#endif
+#include "tests/benchmark.hpp"
 
 namespace memman {
 
@@ -119,6 +115,7 @@ namespace memman {
       template<typename... Args>
       auto Allocate(Args&&... args) -> Iterator {
         int index = free_space_.front();
+        StartTimer("Allocation");
         if (chunk_[index] != nullptr) {
           Tobj obj(args...);
           *(chunk_[index]) = obj;
@@ -126,7 +123,7 @@ namespace memman {
         else {
           chunk_[index] = new Tobj(std::forward<Args>(args)...);
         }
-
+        EndTimer;
         counters_[index] = 1;
         free_space_.pop_front();
         managed_space_.emplace_back(index);
@@ -276,6 +273,7 @@ namespace memman {
       auto New(Args&&... args) -> Pointer<Tobj> {
         Tobj* new_obj = nullptr;
         MemoryChunk<Tobj>* chunk = nullptr;
+        StartTimer("New");
         try {
           // std::cout << "Finding mem chunk\n";
           chunk = FindNonFullChunk();
@@ -295,7 +293,7 @@ namespace memman {
         new_obj = iter.GetPointer();
         Pointer<Tobj> ret(iter.GetPointer());
         ret.cnt_ctrlr_ = iter.GetCntCtrl();
-
+        EndTimer;
         return ret;
       }
 
