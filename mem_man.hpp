@@ -115,15 +115,17 @@ namespace memman {
       template<typename... Args>
       auto Allocate(Args&&... args) -> Iterator {
         int index = free_space_.front();
-        StartTimer("Allocation");
         if (chunk_[index] != nullptr) {
+          StartTimer("Copy");
           Tobj obj(args...);
           *(chunk_[index]) = obj;
+          EndTimer;
         }
         else {
+          StartTimer("Allocate");
           chunk_[index] = new Tobj(std::forward<Args>(args)...);
+          EndTimer;
         }
-        EndTimer;
         counters_[index] = 1;
         free_space_.pop_front();
         managed_space_.emplace_back(index);
@@ -183,6 +185,7 @@ namespace memman {
       std::list<int> managed_space_;
 
       void Init() {
+        StartTimer("Allocate Chunk");
         chunk_ = new Tobj * [chunk_popul_];
         counters_ = new size_t[chunk_popul_];
         cnt_ctrl_ = new CountControler[chunk_popul_];
@@ -194,6 +197,7 @@ namespace memman {
             counters_[i] += op;
           };
         }
+        EndTimer;
       }
 
     };
@@ -217,7 +221,7 @@ namespace memman {
         size_t mem = 0;
         for (auto& obs : observers_)
           mem += obs();
-        std::cout << "\t Memory before Sweep request: " << mem << '\n';
+        // std::cout << "\t Memory before Sweep request: " << mem << '\n';
         SweepIfThreshold(mem >= (threshold_ / 100 * MEM_SIZE));
         return mem + size > MEM_SIZE ? false : true;
       }
@@ -242,16 +246,18 @@ namespace memman {
 
       void SweepIfThreshold(bool reached) {
         if (reached) {
+          StartTimer("Sweep");
           for (auto& sweeper : sweepers_)
             sweeper();
+          EndTimer;
         }
       }
 
       MemoryObserver() {
 #ifdef MEM_SIZE
-        std::cout << "mem_size: " << MEM_SIZE
-          << "\nmem_thresh: " << threshold_ / 100
-          << std::endl;
+        // std::cout << "mem_size: " << MEM_SIZE
+        //   << "\nmem_thresh: " << threshold_ / 100
+        //   << std::endl;
 #endif
       }
       MemoryObserver(const MemoryObserver&) = delete;
@@ -279,15 +285,15 @@ namespace memman {
           chunk = FindNonFullChunk();
         }
         catch (MemoryException& e) {
-          std::cout << '\t' << e.what() << std::endl;
+          // std::cout << '\t' << e.what() << std::endl;
 #ifdef MEM_SIZE
           if (MemoryObserver::Get().CanRequestMemory(sizeof(Tobj) * chunk_list_.front().Population())) { // FIXME: When Chunk population is selected, program breaks at line 125 
             // std::cout << "\tCreating new mem chunk\n";
             chunk_list_.emplace_back();
-          }
+        }
 #endif
           chunk = FindNonFullChunk();
-        }
+      }
         assert(chunk != nullptr);
         auto iter = chunk->Allocate(std::forward<Args>(args)...);
         new_obj = iter.GetPointer();
@@ -295,7 +301,7 @@ namespace memman {
         ret.cnt_ctrlr_ = iter.GetCntCtrl();
         EndTimer;
         return ret;
-      }
+    }
 
     private:
       std::list<MemoryChunk<Tobj>> chunk_list_;
@@ -333,9 +339,9 @@ namespace memman {
       ~MemoryManager() {
         chunk_list_.clear();
       }
-    };
+  };
 
-  } // namespace
+} // namespace
 
   template <typename Tobj>
   class Pointer {
