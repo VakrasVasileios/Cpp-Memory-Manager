@@ -13,10 +13,6 @@ using size_t = unsigned long;
 #define KB 1024
 #define MB 1048576
 
-#ifdef CHUNK_POPULATION
-#define CHUNK_POP CHUNK_POPULATION
-#endif
-
 #ifdef CHUNK_SIZE_KB
 #define CHUNK_SIZE CHUNK_SIZE_KB * KB
 #endif
@@ -25,12 +21,12 @@ using size_t = unsigned long;
 #define CHUNK_SIZE CHUNK_SIZE_MB * MB
 #endif
 
-#if !defined(CHUNK_SIZE_KB) && !defined(CHUNK_SIZE_MB)
+#if !defined(CHUNK_SIZE_KB) && !defined(CHUNK_SIZE_MB) // default chunk size is 128 KB if size is not specified
 #define CHUNK_SIZE 128 * KB
 #endif
 
-#if defined(CHUNK_POPULATION) && (defined(CHUNK_SIZE_KB) || defined(CHUNK_SIZE_MB))
-#error CHUNK_POPULATION flag cannot be used in tandum with CHUNK_SIZE_KB or CHUNK_SIZE_MB flag
+#if defined(CHUNK_SIZE_KB) && defined(CHUNK_SIZE_MB)
+#error CHUNK_SIZE_KB and CHUNK_SIZE_MB cannot be used at the same time
 #endif
 
 #ifdef HEAP_SIZE_MB
@@ -114,6 +110,7 @@ namespace memman {
 
       template<typename... Args>
       auto Allocate(Args&&... args) -> Iterator {
+        StartTimer("Allocate");
         int index = free_space_.front();
         if (chunk_[index] != nullptr) {
           StartTimer("Copy");
@@ -122,10 +119,11 @@ namespace memman {
           EndTimer;
         }
         else {
-          StartTimer("Allocate");
+          StartTimer("Malloc");
           chunk_[index] = new Tobj(std::forward<Args>(args)...);
           EndTimer;
         }
+        EndTimer;
         counters_[index] = 1;
         free_space_.pop_front();
         managed_space_.emplace_back(index);
@@ -172,11 +170,7 @@ namespace memman {
       }
 
     private:
-#if defined(CHUNK_POP)
-      size_t chunk_popul_ = CHUNK_POP;
-#else
       size_t chunk_popul_ = CHUNK_SIZE / sizeof(Tobj);
-#endif
       Tobj** chunk_;
       size_t* counters_;
       CountControler* cnt_ctrl_;
@@ -185,7 +179,7 @@ namespace memman {
       std::list<int> managed_space_;
 
       void Init() {
-        StartTimer("Allocate Chunk");
+        StartTimer("CreateChunk");
         chunk_ = new Tobj * [chunk_popul_];
         counters_ = new size_t[chunk_popul_];
         cnt_ctrl_ = new CountControler[chunk_popul_];
@@ -290,18 +284,19 @@ namespace memman {
           if (MemoryObserver::Get().CanRequestMemory(sizeof(Tobj) * chunk_list_.front().Population())) { // FIXME: When Chunk population is selected, program breaks at line 125 
             // std::cout << "\tCreating new mem chunk\n";
             chunk_list_.emplace_back();
-        }
+          }
 #endif
           chunk = FindNonFullChunk();
-      }
+        }
         assert(chunk != nullptr);
         auto iter = chunk->Allocate(std::forward<Args>(args)...);
+
         new_obj = iter.GetPointer();
         Pointer<Tobj> ret(iter.GetPointer());
         ret.cnt_ctrlr_ = iter.GetCntCtrl();
         EndTimer;
         return ret;
-    }
+      }
 
     private:
       std::list<MemoryChunk<Tobj>> chunk_list_;
@@ -339,9 +334,9 @@ namespace memman {
       ~MemoryManager() {
         chunk_list_.clear();
       }
-  };
+    };
 
-} // namespace
+  } // namespace
 
   template <typename Tobj>
   class Pointer {
@@ -397,6 +392,5 @@ namespace memman {
    *
    */
   void sweep_memory(void) { MemoryObserver::Get().SweepMemory(); }
-
 
 } // namespace memman
